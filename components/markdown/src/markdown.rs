@@ -680,13 +680,26 @@ pub fn markdown_to_html(
                     });
                 }
                 Event::Html(text) => {
-                    if !has_summary && MORE_DIVIDER_RE.is_match(&text) {
+                    if !has_summary && MORE_DIVIDER_RE.is_match(text.as_ref()) {
                         has_summary = true;
                         events.push(Event::Html(CONTINUE_READING.into()));
                         continue;
                     }
                     if !contains_shortcode(text.as_ref()) {
                         events.push(Event::Html(text));
+                        continue;
+                    }
+
+                    render_shortcodes!(false, text, range);
+                }
+                Event::InlineHtml(text) => {
+                    if !has_summary && MORE_DIVIDER_RE.is_match(text.as_ref()) {
+                        has_summary = true;
+                        events.push(Event::InlineHtml(CONTINUE_READING.into()));
+                        continue;
+                    }
+                    if !contains_shortcode(text.as_ref()) {
+                        events.push(Event::InlineHtml(text));
                         continue;
                     }
 
