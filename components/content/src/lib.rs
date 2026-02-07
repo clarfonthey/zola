@@ -1,5 +1,6 @@
 mod front_matter;
 
+mod alias;
 mod file_info;
 mod library;
 mod page;
@@ -11,6 +12,7 @@ mod taxonomies;
 mod types;
 mod utils;
 
+pub use alias::{Alias, AliasKind};
 pub use file_info::FileInfo;
 pub use front_matter::{PageFrontMatter, SectionFrontMatter};
 pub use library::Library;

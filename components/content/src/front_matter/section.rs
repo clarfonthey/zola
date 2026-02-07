@@ -5,8 +5,8 @@ use errors::Result;
 use utils::de::fix_toml_dates;
 use utils::types::InsertAnchor;
 
-use crate::SortBy;
 use crate::front_matter::split::RawFrontMatter;
+use crate::{Alias, SortBy};
 
 const DEFAULT_PAGINATE_PATH: &str = "page";
 
@@ -51,7 +51,7 @@ pub struct SectionFrontMatter {
     /// Useful for the same reason as `render` but when you don't want a 404 when
     /// landing on the root section page
     #[serde(skip_serializing)]
-    pub redirect_to: Option<String>,
+    pub redirect_to: Option<Alias>,
     /// Whether the section content and its pages/subsections are included in the index.
     /// Defaults to `true` but is only used if search if explicitly enabled in the config.
     #[serde(skip_serializing)]
@@ -66,7 +66,7 @@ pub struct SectionFrontMatter {
     /// All aliases for that page. Zola will create HTML templates that will
     /// redirect to this
     #[serde(skip_serializing)]
-    pub aliases: Vec<String>,
+    pub aliases: Vec<Alias>,
     /// Whether to generate a feed for the current section
     #[serde(skip_serializing)]
     pub generate_feeds: bool,

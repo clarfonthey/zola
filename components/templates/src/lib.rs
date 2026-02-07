@@ -13,6 +13,7 @@ use utils::templates::rewrite_theme_paths;
 pub static ZOLA_TERA: Lazy<Tera> = Lazy::new(|| {
     let mut tera = Tera::default();
     tera.add_raw_templates(vec![
+        ("__zola_builtins/_redirects", include_str!("builtins/_redirects")),
         ("__zola_builtins/404.html", include_str!("builtins/404.html")),
         ("__zola_builtins/atom.xml", include_str!("builtins/atom.xml")),
         ("__zola_builtins/rss.xml", include_str!("builtins/rss.xml")),

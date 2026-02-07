@@ -36,6 +36,14 @@ pub enum ExcludePaginatedPagesInSitemap {
     All,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RenderAliases {
+    Emit(bool),
+    #[serde(rename = "_redirects")]
+    Redirects,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -58,6 +66,8 @@ pub struct Config {
 
     /// Whether to generate feeds. Defaults to false.
     pub generate_feeds: bool,
+    /// How to render aliases for pages.
+    pub render_aliases: RenderAliases,
     /// The number of articles to include in the feed. Defaults to including all items.
     pub feed_limit: Option<usize>,
     /// The filenames to use for feeds. Used to find the templates, too.
@@ -412,6 +422,7 @@ impl Default for Config {
             default_language: "en".to_string(),
             languages: HashMap::new(),
             generate_feeds: false,
+            render_aliases: RenderAliases::Emit(true),
             feed_limit: None,
             feed_filenames: vec!["atom.xml".to_string()],
             hard_link_static: false,

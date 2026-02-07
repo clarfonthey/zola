@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 
 use ahash::AHashMap;
 use common::{build_site, build_site_with_setup};
-use config::TaxonomyConfig;
-use content::Page;
+use config::{TaxonomyConfig, RenderAliases};
+use content::{Page};
 use site::Site;
 use site::sitemap;
 use utils::types::InsertAnchor;
@@ -114,6 +114,54 @@ fn errors_on_unknown_taxonomies() {
         err.to_string(),
         "Page `unknown/taxo.md` has taxonomy `wrong` which is not defined in config.toml"
     );
+}
+
+#[test]
+fn yes_emit_aliases() {
+    let (_, _tmp_dir, public) = build_site_with_setup("test_site", |mut site| {
+        site.config.render_aliases = RenderAliases::Emit(true);
+        (site, true)
+    });
+
+    // aliases work
+    assert!(file_exists!(public, "an-old-url/old-page/index.html"));
+    assert!(file_contains!(public, "an-old-url/old-page/index.html", "something-else"));
+    assert!(file_contains!(public, "another-old-url/index.html", "posts/"));
+
+    // html aliases work
+    assert!(file_exists!(public, "an-old-url/an-old-alias.html"));
+    assert!(file_contains!(public, "an-old-url/an-old-alias.html", "something-else"));
+
+    // redirect_to works
+    assert!(file_exists!(public, "posts/tutorials/devops/index.html"));
+    assert!(file_contains!(public, "posts/tutorials/devops/index.html", "docker"));
+}
+
+#[test]
+fn no_emit_aliases() {
+    let (_, _tmp_dir, public) = build_site_with_setup("test_site", |mut site| {
+        site.config.render_aliases = RenderAliases::Emit(false);
+        (site, true)
+    });
+    assert!(!file_exists!(public, "an-old-url/old-page/index.html"));
+    assert!(!file_exists!(public, "another-old-url/index.html"));
+    assert!(!file_exists!(public, "an-old-url/an-old-alias.html"));
+    assert!(!file_exists!(public, "posts/tutorials/devops/index.html"));
+}
+
+#[test]
+fn emit_redirects() {
+    let (_, _tmp_dir, public) = build_site_with_setup("test_site", |mut site| {
+        site.config.render_aliases = RenderAliases::Redirects;
+        (site, true)
+    });
+    assert!(!file_exists!(public, "an-old-url/old-page/index.html"));
+    assert!(!file_exists!(public, "another-old-url/index.html"));
+    assert!(file_exists!(public, "_redirects"));
+    assert!(file_contains!(public, "_redirects", "/top-level.html /posts/top-level-alias/ 302"));
+    assert!(file_contains!(public, "_redirects", "/an-old-url/an-old-alias.html /posts/something-else/ 302"));
+    assert!(file_contains!(public, "_redirects", "/another-old-url/ /posts/ 302"));
+    assert!(file_contains!(public, "_redirects", "/posts/tutorials/devops/ /posts/tutorials/devops/docker/ 302"));
 }
 
 #[test]

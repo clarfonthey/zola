@@ -9,6 +9,7 @@ use time::{Date, OffsetDateTime, PrimitiveDateTime};
 use errors::{Result, bail};
 use utils::de::{fix_toml_dates, from_unknown_datetime};
 
+use crate::Alias;
 use crate::front_matter::split::RawFrontMatter;
 
 /// The front matter of every page
@@ -58,7 +59,7 @@ pub struct PageFrontMatter {
     /// All aliases for that page. Zola will create HTML templates that will
     /// redirect to this
     #[serde(skip_serializing)]
-    pub aliases: Vec<String>,
+    pub aliases: Vec<Alias>,
     /// Specify a template different from `page.html` to use for that page
     #[serde(skip_serializing)]
     pub template: Option<String>,

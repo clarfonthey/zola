@@ -7,6 +7,7 @@ pub mod tpls;
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::iter;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
@@ -14,11 +15,12 @@ use std::sync::{Arc, Mutex, RwLock};
 use log;
 use once_cell::sync::Lazy;
 use rayon::prelude::*;
+use serde::Serialize;
 use tera::{Context, Tera};
 use walkdir::{DirEntry, WalkDir};
 
-use config::{Config, IndexFormat, get_config};
-use content::{Library, Page, Paginator, Section, Taxonomy};
+use config::{Config, IndexFormat, RenderAliases, get_config};
+use content::{AliasKind, Library, Page, Paginator, Section, Taxonomy};
 use errors::{Result, anyhow, bail};
 use relative_path::RelativePathBuf;
 use std::time::Instant;
@@ -42,6 +44,13 @@ pub enum BuildMode {
     Memory,
     /// Both on the filesystem and in memory
     Both,
+}
+
+#[derive(Serialize, Eq, PartialEq, Ord, PartialOrd)]
+struct Alias<'a> {
+    from: Cow<'a, str>,
+    to: Cow<'a, str>,
+    code: u16,
 }
 
 #[derive(Debug)]
@@ -808,6 +817,10 @@ impl Site {
         self.copy_static_directories()?;
         log_time(start, "Copied static dir");
 
+        // Render opaque aliases, which copy pages
+        self.render_opaque_aliases()?;
+        start = log_time(start, "Rendered opaque aliases");
+
         Ok(())
     }
 
@@ -880,36 +893,114 @@ impl Site {
         Ok(())
     }
 
+    fn get_aliases<'l>(&self, library: &'l Library) -> impl Iterator<Item = Alias<'l>> {
+        fn fix_path(mut from: &str) -> Cow<'_, str> {
+            if from.ends_with("/index.html") {
+                from = &from[..from.len() - "index.html".len()];
+            }
+            let mut from = Cow::Borrowed(from);
+            if !from.starts_with("/") {
+                from = Cow::Owned(format!("/{from}"));
+            }
+            if !from.ends_with(".html") && !from.ends_with("/") {
+                from.to_mut().push_str("/");
+            }
+            from
+        }
+
+        iter::chain(
+            library.pages.iter().flat_map(|(_, page)| {
+                page.meta.aliases.iter().map(|alias| Alias {
+                    from: fix_path(&alias.path),
+                    to: fix_path(&page.path),
+                    code: alias.code as u16,
+                })
+            }),
+            library.sections.iter().flat_map(|(_, section)| {
+                section
+                    .meta
+                    .aliases
+                    .iter()
+                    .map(|alias| Alias {
+                        from: fix_path(&alias.path),
+                        to: fix_path(&section.path),
+                        code: alias.code as u16,
+                    })
+                    .chain(section.meta.redirect_to.as_ref().map(|redirect| Alias {
+                        from: fix_path(&section.path),
+                        to: if is_external_link(redirect) {
+                            Cow::Borrowed(redirect)
+                        } else {
+                            fix_path(&redirect)
+                        },
+                        code: AliasKind::default() as u16,
+                    }))
+            }),
+        )
+    }
+
     fn render_alias(&self, alias: &str, permalink: &str) -> Result<()> {
-        let mut split = alias.split('/').collect::<Vec<_>>();
+        let mut components = alias.split('/').collect::<Vec<_>>();
 
         // If the alias ends with an html file name, use that instead of mapping
         // as a path containing an `index.html`
-        let page_name = match split.pop() {
+        let page_name = match components.pop() {
             Some(part) if part.ends_with(".html") => part,
             Some(part) => {
-                split.push(part);
+                components.push(part);
                 "index.html"
             }
             None => "index.html",
         };
         let content = render_redirect_template(permalink, &self.tera)?;
-        self.write_content(&split, page_name, content)?;
+        self.write_content(&components, page_name, content)?;
         Ok(())
     }
 
     /// Renders all the aliases for each page/section: a magic HTML template that redirects to
     /// the canonical one
     pub fn render_aliases(&self) -> Result<()> {
-        let library = self.library.read().unwrap();
-        for (_, page) in &library.pages {
-            for alias in &page.meta.aliases {
-                self.render_alias(alias, &page.permalink)?;
+        match self.config.render_aliases {
+            // emit nothing
+            RenderAliases::Emit(false) => (),
+
+            // emit aliases as individual files
+            RenderAliases::Emit(true) => {
+                let library = self.library.read().unwrap();
+                for alias in self.get_aliases(&library) {
+                    if alias.code != 200 {
+                        self.render_alias(&alias.from, &alias.to)?;
+                    }
+                }
+            }
+
+            // emit _redirects template instead
+            RenderAliases::Redirects => {
+                let library = self.library.read().unwrap();
+                let mut aliases = self.get_aliases(&library).collect::<Vec<_>>();
+                aliases.sort();
+                let mut context = Context::new();
+                context.insert("aliases", &aliases);
+                let output =
+                    render_template("_redirects", &self.tera, context, &self.config.theme)?;
+                self.write_content(&[], "_redirects", output)?;
             }
         }
-        for (_, section) in &library.sections {
-            for alias in &section.meta.aliases {
-                self.render_alias(alias, &section.permalink)?;
+        Ok(())
+    }
+
+    /// Renders opaque aliases, which copy pages instead of redirecting.
+    pub fn render_opaque_aliases(&self) -> Result<()> {
+        if self.config.render_aliases == RenderAliases::Emit(true) {
+            let library = self.library.read().unwrap();
+            for alias in self.get_aliases(&library) {
+                if alias.code == 200 {
+                    let mut from = self.output_path.clone();
+                    from.push(&alias.from[1..]);
+                    let mut to = self.output_path.clone();
+                    to.push(&alias.to[1..]);
+                    copy_file_if_needed(&from, &to, self.config.hard_link_static);
+                }
             }
         }
         Ok(())
@@ -1159,22 +1250,7 @@ impl Site {
                 .collect::<Result<()>>()?;
         }
 
-        if !section.meta.render {
-            return Ok(());
-        }
-
-        if let Some(ref redirect_to) = section.meta.redirect_to {
-            let permalink: Cow<str> = if is_external_link(redirect_to) {
-                Cow::Borrowed(redirect_to)
-            } else {
-                Cow::Owned(self.config.make_permalink(redirect_to))
-            };
-            self.write_content(
-                &components,
-                "index.html",
-                render_redirect_template(&permalink, &self.tera)?,
-            )?;
-
+        if !section.meta.render || section.meta.redirect_to.is_some() {
             return Ok(());
         }
 
